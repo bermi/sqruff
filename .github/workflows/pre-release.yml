@@ -1,0 +1,78 @@
+name: Pre-release
+
+on:
+  workflow_dispatch:
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.os }}
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: sqruff-linux-x86_64-musl.tar.gz
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin: sqruff
+          - name: sqruff-linux-aarch64-musl.tar.gz
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            bin: sqruff
+          - name: sqruff-windows-x86_64.zip
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: sqruff.exe
+          - name: sqruff-darwin-x86_64.tar.gz
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            bin: sqruff
+          - name: sqruff-darwin-aarch64.tar.gz
+            os: macOS-latest
+            target: aarch64-apple-darwin
+            bin: sqruff
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-binaries
+        with:
+          package: true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.name }}
+          path: |
+            ${{ matrix.platform.name }}
+            ${{ matrix.platform.name }}.sha256
+
+  release:
+    name: Create pre-release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Create pre-release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: pre-release-${{ steps.sha.outputs.short }}
+          name: Pre-release (${{ steps.sha.outputs.short }})
+          prerelease: true
+          artifacts: |
+            sqruff-*
+          body: |
+            Pre-release build from `${{ github.ref_name }}` branch at ${{ github.sha }}.
