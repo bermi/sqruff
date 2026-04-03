@@ -51,10 +51,28 @@ jobs:
             ${{ matrix.platform.name }}
             ${{ matrix.platform.name }}.sha256
 
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build WASM
+        run: RUSTFLAGS="-C opt-level=z" wasm-pack build crates/lib-wasm --target web
+      - name: Package WASM
+        run: tar -czf sqruff-wasm.tar.gz -C crates/lib-wasm/pkg .
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqruff-wasm.tar.gz
+          path: sqruff-wasm.tar.gz
+
   release:
     name: Create pre-release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, build-wasm]
     permissions:
       contents: write
     steps:
