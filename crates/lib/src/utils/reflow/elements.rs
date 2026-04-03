@@ -260,7 +260,7 @@ impl ReflowPoint {
 
                 let new_indent = SegmentBuilder::whitespace(tables.next_id(), desired_indent);
 
-                let (last_newline_idx, last_newline) = self
+                let literal_newline = self
                     .segments
                     .iter()
                     .enumerate()
@@ -268,8 +268,14 @@ impl ReflowPoint {
                     .find(|(_, it)| {
                         it.is_type(SyntaxKind::Newline)
                             && it.get_position_marker().unwrap().is_literal()
-                    })
-                    .unwrap();
+                    });
+
+                // If there is no literal newline (e.g. the newline comes from
+                // a template placeholder's consumed whitespace), we cannot
+                // safely rewrite indentation — skip the fix.
+                let Some((last_newline_idx, last_newline)) = literal_newline else {
+                    return (Vec::new(), self.clone());
+                };
 
                 let mut new_segments = self.segments[..=last_newline_idx].to_vec();
                 new_segments.push(new_indent.clone());
@@ -820,3 +826,46 @@ impl PartialEq<ReflowBlock> for ReflowElement {
 }
 
 pub type ReflowSequenceType = Vec<ReflowElement>;
+
+#[cfg(test)]
+mod tests {
+    use crate::core::config::FluffConfig;
+    use crate::core::linter::core::Linter;
+
+    #[test]
+    fn test_indent_to_no_literal_newline_placeholder_templater() {
+        // Regression test: indent_to() used to panic with unwrap() on None
+        // when a ReflowPoint had newlines from template placeholder consumed
+        // whitespace but no literal newline segments.
+        let config = FluffConfig::from_source(
+            r#"
+[sqruff]
+dialect = bigquery
+templater = placeholder
+rules = LT02
+
+[sqruff:templater:placeholder]
+param_regex = \$\{(?P<param_name>[\w_.]+)\}
+PROJECT = my_project
+DATASET = my_dataset
+"#,
+            None,
+        );
+
+        let mut linter = Linter::new(config, None, None, true).unwrap();
+
+        let sql = r#"
+BEGIN
+SET x = (
+  SELECT a
+  FROM `${PROJECT}.${DATASET}.MY_TABLE`
+  WHERE b = 1
+);
+END;
+"#;
+
+        // This should not panic.
+        let result = linter.lint_string_wrapped(sql, true);
+        assert!(result.is_ok(), "lint_string_wrapped should not panic");
+    }
+}
