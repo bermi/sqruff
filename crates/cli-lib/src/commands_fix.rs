@@ -39,7 +39,9 @@ pub(crate) fn run_fix(
             }
             let path = std::mem::take(&mut file.path);
             let fixed = file.fix_string();
-            std::fs::write(path, fixed).unwrap();
+            if let Err(e) = std::fs::write(&path, fixed) {
+                eprintln!("Error writing {}: {}", path, e);
+            }
         }
 
         linter.formatter_mut().unwrap().completion_message(files);
@@ -89,6 +91,40 @@ mod tests {
 
     fn ignore_none(_: &Path) -> bool {
         false
+    }
+
+    #[test]
+    fn run_fix_does_not_panic_on_read_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        // Write SQL with a fixable violation (leading whitespace violates LT02)
+        writeln!(tmp, "     SELECT 1").unwrap();
+        tmp.flush().unwrap();
+        let tmp = tmp.into_temp_path();
+        let path = tmp.to_path_buf();
+
+        // Make the file read-only
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let args = FixArgs {
+            paths: vec![path.clone()],
+            format: Format::Human,
+        };
+        let config = FluffConfig::default();
+
+        // This should not panic — it should handle the permission error gracefully
+        run_fix(args, config, ignore_none, true);
+
+        // Verify the file was not modified (write should have failed)
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            contents.starts_with("     "),
+            "file should be unchanged since write was denied"
+        );
+
+        // Restore write permissions so cleanup can remove the temp file
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     #[test]
