@@ -193,7 +193,8 @@ impl ReflowPoint {
         } else if self.num_newlines() != 0 {
             if let Some(indent_seg) = indent_seg {
                 if indent_seg.raw() == desired_indent {
-                    unimplemented!()
+                    // Indent already matches — nothing to do.
+                    return (Vec::new(), self.clone());
                 } else if desired_indent.is_empty() {
                     let idx = self
                         .segments
@@ -820,3 +821,37 @@ impl PartialEq<ReflowBlock> for ReflowElement {
 }
 
 pub type ReflowSequenceType = Vec<ReflowElement>;
+
+#[cfg(test)]
+mod tests {
+    use crate::core::config::FluffConfig;
+    use crate::core::linter::core::Linter;
+
+    #[test]
+    fn test_indent_to_matching_indent_is_noop() {
+        // Regression test: indent_to() used to hit unimplemented!() when the
+        // existing indent already matched the desired indent.
+        let config = FluffConfig::from_source(
+            r#"
+[sqruff]
+rules = LT02
+"#,
+            None,
+        );
+
+        let mut linter = Linter::new(config, None, None, true).unwrap();
+
+        // SQL that is already correctly indented (4-space default) — should
+        // produce no violations and must not panic.
+        let sql = "SELECT\n    a,\n    b\nFROM my_table\nWHERE\n    c = 1\n";
+
+        let result = linter.lint_string_wrapped(sql, true);
+        assert!(result.is_ok(), "lint_string_wrapped should not panic");
+        let result = result.unwrap();
+        assert!(
+            result.violations().is_empty(),
+            "already-indented SQL should have no violations, got: {:?}",
+            result.violations()
+        );
+    }
+}
